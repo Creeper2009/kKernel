@@ -1,0 +1,60 @@
+local function newLine(cReturn)
+	if not cReturn then cReturn = colors.white end
+	display.setBackgroundColor(colors.black)
+	write('\n')
+	display.setBackgroundColor(cReturn)
+end
+
+local function print(str)
+	write(str)
+	newLine()
+end
+
+_G['cWrite'] = function(str, fore, bg)
+	if not fore then fore = colors.white end
+	if not bg then bg = colors.black end	
+	display.setTextColor(fore)
+	display.setBackgroundColor(bg)
+	write(str)
+	display.setTextColor(colors.white)
+	display.setBackgroundColor(colors.black)
+end
+
+_G['cPrint'] = function(str, fore, bg)
+	cWrite(str, fore, bg)
+	newLine()
+end
+
+_G['sPrint'] = function(prefix, str, preColor, strColor, preBG)
+	if not preColor then preColor = colors.white end
+	if not strColor then strColor = colors.white end
+	if not preBG then preBG = colors.black end
+	cWrite('['..prefix..']', preColor, preBG)
+	cPrint(' '..str, strColor, colors.black)
+end
+
+_G['triprint'] = function(prefix, str, suffix, preColor, strColor, sufColor, preBG)
+	if not preColor then preColor = colors.white end
+	if not strColor then strColor = colors.white end
+	if not sufColor then sufColor = colors.white end
+	if not preBG then preBG = colors.black end
+	cWrite('['..prefix..']', preColor, preBG)
+	cWrite(' '..str, strColor, colors.black)
+	cPrint(' '..suffix, sufColor)
+end
+
+function warning(prefix, str, preColor, preBG)
+	str = 'WARNING: ' .. str
+	if not preColor then preColor = colors.white end
+	if not preBG then preBG = colors.black end
+	cWrite('['..prefix..']', preColor, preBG)
+	cPrint(' '..str, colors.yellow, colors.black)
+end
+
+function error(prefix, str, preColor, preBG)
+	str = 'ERROR: ' .. str
+	if not preColor then preColor = colors.white end
+	if not preBG then preBG = colors.black end
+	cWrite('['..prefix..']', preColor, preBG)
+	cPrint(' '..str, colors.red, colors.black)
+end

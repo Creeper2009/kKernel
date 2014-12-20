@@ -1,0 +1,199 @@
+tModule = {
+	['name'] = 'Filesystem';
+	['workspace'] = nil;
+	['version'] = '1.0';
+	['author'] = 'Mr. Bateman';
+}
+
+--log.warning('FILESYS', 'Module partially broken', colors.yellow, colors.gray)
+--sleep(3)
+--return false, 'Module partially broken'
+
+--patch fs
+local oldFS = {}
+for k,v in pairs( fs ) do
+	oldFS[k] = v
+end
+
+local function resolve(path)
+	--if path:sub(1,1) ~= '/' then error("Metadata error: Path not absolute", 3) end
+	return path
+end
+
+local mbr = '/.$MFT'
+metadata = {}
+
+local count = 0
+local function serializeImpl( t, tTracking, sIndent )
+	count = count + 1
+	if count % 499 == 0 then sleep(0) end
+    local sType = type(t)
+    if sType == "table" then
+        if tTracking[t] ~= nil then
+            error( "Cannot serialize table with recursive entries", 0 )
+        end
+        tTracking[t] = true
+
+        if next(t) == nil then
+            -- Empty tables are simple
+            return "{}"
+        else
+            -- Other tables take more work
+            local sResult = "{"--\n"
+            local sSubIndent = "" -- sIndent .. "  "
+            local tSeen = {}
+            for k,v in ipairs(t) do
+				print('k: ' .. k .. ';v: ' .. v)
+                tSeen[k] = true
+                sResult = sResult .. sSubIndent .. serializeImpl( v, tTracking, sSubIndent ) .. ";" --\n"
+            end
+            for k,v in pairs(t) do
+                if not tSeen[k] then
+                    local sEntry
+                    if type(k) == "string" and string.match( k, "^[%a_][%a%d_]*$" ) then
+                        sEntry = k .. "=" .. serializeImpl( v, tTracking, sSubIndent ) .. ";" --\n"
+                    else
+                        sEntry = "[" .. serializeImpl( k, tTracking, sSubIndent ) .. "]=" .. serializeImpl( v, tTracking, sSubIndent ) .. ";" --\n"
+                    end
+                    sResult = sResult .. sSubIndent .. sEntry
+                end
+            end
+            sResult = sResult .. sIndent .. "}"
+            return sResult
+        end
+        
+    elseif sType == "string" then
+        return string.format( "%q", t )
+		
+	elseif sType == "boolean" or sType == "nil" then
+        return tostring(t)
+        
+	elseif sType == "number" then
+		--return string.format('%02x', t)
+		return tostring(t)
+    else
+        error( "Cannot serialize type "..sType, 0 )
+        
+    end
+end
+
+function bigSerialize( t ) --patched so it doesn't hang when encoding big tables
+    local tTracking = {}
+    return serializeImpl( t, tTracking, "" )
+end
+
+local function cullRecord(file)
+	metadata[resolve(file)] = nil
+end
+
+local function cullRecords()
+	local m2 = {}
+	for k,v in pairs(metadata) do
+		m2[k] = v
+	end
+	for k,v in pairs(m2) do
+		if (not oldFS.exists(k)) or (oldFS.getDrive(k) == 'rom') or oldFS.getName(k):sub(1,1) == '.' then 
+			cullRecord(k)
+		end
+	end
+end
+
+local function saveMetadata()
+	--local file = fs.open('/.mbr', 'w')
+	cullRecords()
+	fs.safeSave(mbr, 'return '..bigSerialize(metadata))
+end
+
+local function loadMetadata()
+	metadata = loadstring(fs.safeLoad(mbr))()
+end
+
+local function getTimestamp()
+	local t = textutils.formatTime(os.time(), false)
+	return  t..'/'..os.day()
+end
+
+local function newRecord(sPath)
+	local file = resolve(sPath)
+	metadata[file] = {}
+	metadata[file]['created'] = getTimestamp()
+	metadata[file]['accessed'] = getTimestamp()
+	metadata[file]['modified'] = getTimestamp()
+end
+
+local function addNewFiles(path)
+	if fs.isDir(path) then
+		local list = fs.list(path)
+		for i = 1, #list do
+			addNewFiles(path..'/'..list[i])
+		end
+		--if not metadata[path] then newRecord(path) end
+	else
+		local s = resolve(path)
+		local b = metadata[s]
+		if not b then newRecord(resolve(path)) end
+	end
+end
+
+local function saveRecord(sPath, record, data)
+	local file = resolve(sPath)
+	if not metadata[file] then newRecord(file) end
+	metadata[file][record] = data
+end
+
+local function updateRecord(file, record)
+	saveRecord(file, record, getTimestamp())
+end
+
+local function getRecord(file, record)
+	if not metadata[file] then newRecord(file) end
+	return metadata[file][record]
+end
+
+local function copyRecord(from, to, record)
+	if not metadata[from] then newRecord(from) end
+	if not metadata[to] then newRecord(to) end
+	metadata[to][record] = metadata[from][record]
+end
+
+if not fs.exists(mbr) then saveMetadata() end
+loadMetadata()
+addNewFiles('/')
+saveMetadata()
+
+fs.open = function(file, action)
+	local sPath = resolve(file)
+	if type(action) ~= 'string' or action == '' or file == mbr then return oldFS.open(file, action) end
+	if action:sub(1,1) == 'w' or action:sub(1,1) == 'a' then
+		updateRecord(sPath, 'modified')
+	end
+	updateRecord(sPath, 'accessed')
+	saveMetadata()
+	return oldFS.open(file, action)
+end
+
+fs.copy = function(from, to)
+	local sFrom = resolve(from)
+	local sTo = resolve(to)
+	copyRecord(sFrom, sTo, 'created')
+	updateRecord(sFrom, 'accessed')
+	updateRecord(sTo, 'accessed')
+	updateRecord(sTo, 'modified')
+	saveMetadata()
+	return oldFS.copy(from, to)
+end
+
+fs.move = function(from, to)
+	local sFrom = resolve(from)
+	local sTo = resolve(to)
+	copyRecord(sFrom, sTo, 'created')
+	updateRecord(sTo, 'accessed')
+	updateRecord(sTo, 'modified')
+	saveMetadata()
+	return oldFS.move(from, to)
+end
+
+fs.exists = function(file)
+	updateRecord(resolve(file), 'accessed')
+	return oldFS.exists(file)
+end

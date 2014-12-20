@@ -1,0 +1,21 @@
+local oldFS = fs
+
+function fs.safeSave(path, str, append)
+	local f = fs.open(path, (append and 'a' or 'w')..'b')
+	for i = 1,#str do
+		f.write(str:sub(i,i):byte())
+	end
+	f.close()
+end
+
+function fs.safeLoad(path)
+	local f = fs.open(path, 'rb')
+	local s = ''
+	local byte = f.read()
+	while byte ~= nil do
+		s = s .. string.char(byte)
+		byte = f.read()
+	end
+	f.close()
+	return s
+end

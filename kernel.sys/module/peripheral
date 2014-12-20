@@ -1,0 +1,258 @@
+local function concat(...)
+	local tTables = {...}
+	local t = {}
+	for i =1,#tTables do
+		for k,v in pairs(tTables[i]) do
+			t[v.side] = v --tTables[i][ii]
+		end
+	end
+	return t
+end
+local function count(tTable)
+	local i = 0
+	for k,v in pairs(tTable) do
+		i = i + 1
+	end
+	return i
+end
+
+tModule = {
+	['name'] = 'Peripheral';
+	['workspace'] = 'etc';
+	['version'] = '1.0';
+	['author'] = 'Mr. Bateman';
+}
+
+sPrint('PERIPHERAL', 'Initializing...', colors.cyan, nil, colors.gray)
+
+tPeripherals = {}
+local tVirtual = {}
+local tPhysical = {}
+
+tDrivers = {}
+
+local rawPeripheral = {}
+for k,v in pairs( peripheral ) do
+	rawPeripheral[k] = v
+end
+
+
+function getDriver(type)
+	local function dummy(p)
+		p.onAttach = function(side) end
+		p.onDetach = function() end
+		p.onWrap = function(rawPeripheral) 
+			return rawPeripheral.wrap(p.side)
+		end
+		return p
+	end
+	local function driver(p, type)
+		for k,v in pairs( tDrivers[type] ) do
+			p[k] = v
+		end
+		return p
+	end
+	if tDrivers[type] then
+		cPrint('Success!')
+		--return tDrivers[type]
+		return function(p) return driver(p, type) end
+	else
+		return dummy
+	end
+end
+
+function setDriver(p)
+	return getDriver(p.type)(p)
+end
+
+sPrint('PERIPHERAL', 'Loading Drivers...', colors.cyan, nil, colors.gray)
+
+local tAPIsLoading = {}
+local function loadDriver( _sPath )
+    local sName = fs.getName( _sPath )
+    if tAPIsLoading[sName] == true then
+        return false, "Driver "..sName.." is already being loaded"
+    end
+    tAPIsLoading[sName] = true
+    
+    local tEnv = {}
+    setmetatable( tEnv, { __index = _G } )
+	local function main()
+		local status, data = loadfile(_sPath)
+		return status, data
+	end
+	local status, data, data2 = pcall(main)
+    if data then
+		setfenv( data, tEnv )
+		data()
+	else
+        tAPIsLoading[sName] = nil
+        return false, data2
+    end
+    
+    local tAPI = {}
+    for k,v in pairs( tEnv ) do
+        tAPI[k] = v
+    end
+	if not tAPI.tDriver then
+        tAPIsLoading[sName] = nil
+		return false, 'Invalid Driver: tDriver missing'
+	end
+	tAPI.rawType = tAPI.tDriver.rawType
+    tDrivers[tAPI.tDriver.type] = tAPI    
+    tAPIsLoading[sName] = nil
+    return true, tAPI.tDriver.name
+end
+
+function kernel.loadDriver(sPath)
+	sPath = '/kernel.sys/etc/driver/' .. sPath
+	if fs.exists(sPath) and not fs.isDir(sPath) then
+		return loadDriver(sPath)
+	else
+		return false, nil
+	end
+end
+
+local tAPI = fs.list('/kernel.sys/etc/driver/')
+for i = 1,#tAPI do
+	local result, data = kernel.loadDriver(tAPI[i])
+	if result then
+		triprint('PERIPHERAL', 'Driver ' .. data, 'OK', colors.cyan, nil, colors.lime, colors.gray)
+	else
+		if not isArg('force') then
+			sPrint('PERIPHERAL', 'FATAL: Could not load Driver driver/'..tAPI[i], colors.cyan, colors.red, colors.gray)
+			error(data or 'unavailable',0)
+		else
+			sPrint('PERIPHERAL', 'WARN: Could not load Driver driver/'..tAPI[i], colors.cyan, colors.yellow, colors.gray)
+		end
+	end
+end
+
+function newPeripheral(side, type)
+	if not type then type = rawPeripheral.getType(side) or error('Invalid side',2) end
+	local p = {}
+	p.type = type
+	p.side = side
+	return setDriver(p)
+end
+
+local function callEvents(tOld, tNew)
+	if count(tOld) == 0 and count(tNew) == 0 then return end
+	local tN = {} --table of changes
+	for k,v in pairs( tNew ) do
+		tN[k] = v
+	end
+	for k,v in pairs(tOld) do
+		if not tN[k] then --detached
+			tOld[k].onDetach() --call event
+			tN[k] = nil --remove from list of changes
+		elseif tOld[k].type == tN[k].type then --unchanged
+			tN[k] = nil --remove from list of changes
+		end
+	end
+	for k,v in pairs(tN) do
+		tN[k].onAttach(tN[k].side) --everything else is a new attach
+	end
+end
+
+function refresh()
+	local oldPhysical = tPhysical
+	tPhysical = {}	
+	for k,v in pairs(rawPeripheral.getNames()) do
+		tPhysical[k] = newPeripheral(v)
+	end
+	callEvents(oldPhysical, tPhysical)
+	
+	--tVirtual = tVirtual
+	--tPhysical = newPhysical
+	tPeripherals = concat(tPhysical, tVirtual) --this order allows virtual sides to override physical sides
+end
+
+function attachVirtual(side, type)
+	if tVirtual[side] then error('Side already in use/invalid',2) end
+	if not type then error('Type required',2) end
+	tVirtual[side] = newPeripheral(side, type)
+	tVirtual[side].onAttach(side)
+	refresh()
+end
+
+function detachVirtual(side)
+	if not tVirtual[side] then error('Side invalid',2) end
+	tVirtual[side].onDetach()
+	tVirtual[side] = nil
+	refresh()
+end
+
+--wrap peripheral api
+peripheral.isPresent = function(side)
+	refresh()
+	return tPeripherals[side] and true or false
+end
+
+peripheral.getType = function(side)
+	refresh()
+	return tPeripherals[side] and tPeripherals[side].rawType
+end
+
+peripheral.getMethods = function(side)
+	refresh()
+	if not tPeripherals[side] then return nil end
+	tMethods = {}
+	for k,v in pairs(tPeripherals[side].onWrap(rawPeripheral)) do
+		if type(v) == 'function' then
+			tMethods[#tMethods+1] = k
+		end
+	end
+	return tMethods
+end
+
+peripheral.call = function(side, method, ...)
+	refresh()
+	if tPeripherals[side] then
+		local p = tPeripherals[side].onWrap(rawPeripheral)
+		return p[method] and p[method](...)
+	end
+end
+
+peripheral.wrap = function(side)
+	refresh()
+	return tPeripherals[side] and tPeripherals[side].onWrap(rawPeripheral)
+end
+
+peripheral.find = function(type, fnFilter)
+	refresh()
+	if not fnFilter then fnFilter = function(name, object) return true end end
+	local t = {}
+	for k,v in pairs(tPeripherals) do
+		if v.rawType == type and fnFilter(v.side, v.onWrap(rawPeripheral)) then
+			t[#t+1] = v
+		end
+	end
+	return unpack(t)
+end
+
+peripheral.getNames = function()
+	refresh()
+	local t = {}
+	for k,v in pairs(tPeripherals) do
+		t[#t+1] = v.side
+	end
+	return t
+end
+
+--[[attachVirtual('wew', 'kek')
+attachVirtual('fef', 'kek')
+attachVirtual('jej', 'lel')
+peripheral.call('wew', 'printTopkek', 'Lel')
+cPrint(textutils.serialize(peripheral.getMethods('wew')))
+cPrint(#{peripheral.find('kek')})
+cPrint(textutils.serialize(peripheral.getNames()))
+sleep(5)
+local kek = peripheral.wrap('wew')
+kek.printTopkek()
+detachVirtual('wew')]]
+
+refresh()
+--[[sPrint('PERIPHERAL', count(tPhysical) .. ' physical peripheral(s) attached.', colors.cyan, nil, colors.gray)
+sPrint('PERIPHERAL', count(tVirtual) .. ' virtual peripheral(s) attached.', colors.cyan, nil, colors.gray)]]
+sPrint('PERIPHERAL', count(tPeripherals) .. ' total peripheral(s) attached.', colors.cyan, nil, colors.gray)

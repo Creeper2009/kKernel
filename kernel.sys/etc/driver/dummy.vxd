@@ -1,0 +1,23 @@
+tDriver = {
+	['name'] = 'Dummy'; --Display name
+	['type'] = 'dummy'; --Type of this
+	['rawType'] = 'dummy'; --If spoofing a physical peripheral/driver, change this to suit, otherwise same as 'type'
+	['version'] = '1.0';
+}
+
+function onAttach(side)
+	print('Attached on side '..side..'!')
+end
+
+function onDetach()
+	print('Detached!')
+end
+
+function onWrap(rawPeripheral)
+	print('Wrapped!')
+	local p = {}
+	p.helloWorld = function(str) 
+		cPrint(str or 'Hello World!')
+	end
+	return p
+end

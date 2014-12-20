@@ -1,0 +1,101 @@
+_G['kernel'] = {
+	['version'] = '1.0';
+	['modules'] = {};
+	['api'] = {};
+}
+kernel.chainloader = {
+	['version'] = '1.0';
+	['args'] = '';
+}
+
+local function ext(sPath) --extension
+	local sExt = (string.match(fs.getName(sPath), '.*%.(.+)') or ''):lower()
+	--print(sPath .. '|' .. sExt)
+	return sExt
+end
+
+_G['isArg'] = function(sArg)
+	return false --not implemented yet
+end
+
+local function isLoaded(sPath)
+	return (kernel.api[sPath] or kernel.api[sPath .. '.lua']) ~= nil and true or false
+end
+
+function kernel.loadAPI(sPath, alt)
+	if fs.exists(sPath) and not fs.isDir(sPath) then
+		--[[if ext(sPath) == 'lua' then
+			
+		else]]
+		if alt then
+			local result, data = pcall(dofile,sPath)
+			if data and not result and data:sub(1, 8) == 'pcall: ' then data = data:sub(8,-1) end --remove "pcall: "
+			return result, data
+		end
+		return os.loadAPI(sPath), nil
+	elseif fs.exists(sPath .. '.lua') and not fs.isDir(sPath .. '.lua') then
+		if alt then
+			local result, data = pcall(dofile,sPath .. '.lua')
+				if data and not result and data:sub(1, 8) == 'pcall: ' then data = data:sub(8,-1) end --remove "pcall: "
+			return result, data
+		end
+		return os.loadAPI(sPath..'lua'), nil
+	else
+		return false, nil
+	end
+end
+
+_G['require'] = function(sPath, multiple, alt)
+	sPath = '/kernel.sys/etc/' .. sPath
+	if isLoaded(sPath) and not multiple then return false end
+	kernel.api[sPath] = true
+	return kernel.loadAPI(sPath, alt)
+end
+
+function kernel.loadCSVC(sPath)
+	sPath = '/kernel.sys/csvc/' .. sPath
+	if fs.exists(sPath) and not fs.isDir(sPath) then
+		local result, data = pcall(dofile, sPath)
+		if data and data:sub(1, 8) == 'pcall: ' then data = data:sub(8,-1) end --remove "pcall: "
+		return result, data
+	else
+		return false, nil
+	end
+end
+
+print('ChainLoader v' .. kernel.chainloader.version)
+if not isArg('safemode') then
+	print('[CHAIN] Loading APIs...')
+	local tAPI = fs.list('/kernel.sys/etc/api/')
+	for i = 1,#tAPI do
+		local result, data = require('api/'..tAPI[i], true)
+		if result then
+			print('[CHAIN] INFO: Loaded API etc/api/'..tAPI[i])
+		else
+			if not isArg('force') then
+				error((data and data..'\n' or '')..'[CHAIN] FATAL: Could not load API etc/api/'..tAPI[i],0)
+			else
+				print('[CHAIN] WARN: Could not load API etc/api/'..tAPI[i])
+			end
+		end
+	end	
+	print('[CHAIN] Loading Compatibility Layer...')
+	tAPI = fs.list('/kernel.sys/csvc/')
+	for i = 1,#tAPI do
+		local result, data = kernel.loadCSVC(tAPI[i])
+		if result then
+			print('[CHAIN] INFO: Loaded Service csvc/'..tAPI[i])
+		else
+			if not isArg('force') then
+				error((data and data..'\n' or '')..'[CHAIN] FATAL: Could not load Service csvc/'..tAPI[i],0)
+			else
+				print('[CHAIN] WARN: Could not load Service csvc/'..tAPI[i])
+			end
+		end
+	end
+end
+
+shell.run('/kernel.sys/kernel')
+
+--print('Returning to shell...')
+--sleep(99)

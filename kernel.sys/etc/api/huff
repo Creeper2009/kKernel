@@ -1,0 +1,357 @@
+--Adapted from immibis' work
+--[[
+local inFN, outFN
+
+local args = {...}
+if #args ~= 2 then
+	error("Usage: "..shell.getRunningProgram().." <input file> <output file>", 0)
+end
+inFN = args[1]
+outFN = args[2]
+
+if inFN == 'kek' then
+	for i = 1, 500 do
+		inFN = inFN .. string.char(math.random(1, 64))
+	end
+end
+
+local inText = inFN]]
+
+function encode(data)
+	-- generate a huffman tree - first we need to count the number of times each symbol occurs
+	local symbolCounts = {}
+	local numSymbols = 0
+	for k = 1, #data do
+		local sym = data:sub(k,k)
+		if not symbolCounts[sym] then
+			numSymbols = numSymbols + 1
+			symbolCounts[sym] = 1
+		else
+			symbolCounts[sym] = symbolCounts[sym] + 1
+		end
+	end
+
+	-- convert them to tree nodes and sort them by count, ascending order
+	-- a tree node is either {symbol, count} or {{subtree_0, subtree_1}, count}
+	local treeFragments = {}
+	for sym, count in pairs(symbolCounts) do
+		treeFragments[#treeFragments + 1] = {sym, count}
+	end
+	table.sort(treeFragments, function(a, b)
+		return a[2] < b[2]
+	end)
+
+	while #treeFragments > 1 do
+		-- take the two lowest-count fragments and combine them
+		local a = table.remove(treeFragments, 1)
+		local b = table.remove(treeFragments, 1)
+		
+		local newCount = a[2] + b[2]
+		local new = {{a, b}, newCount}
+		
+		-- insert the new fragment in the right place
+		if #treeFragments == 0 or newCount > treeFragments[#treeFragments][2] then
+			table.insert(treeFragments, new)
+		else
+			local ok = false
+			for k=1,#treeFragments do
+				if treeFragments[k][2] >= newCount then
+					table.insert(treeFragments, k, new)
+					ok = true
+					break
+				end
+			end
+			assert(ok, "internal error: couldn't find place for tree fragment")
+		end
+	end
+
+	local symbolCodes = {}
+
+	local function shallowCopyTable(t)
+		local rv = {}
+		for k,v in pairs(t) do
+			rv[k] = v
+		end
+		return rv
+	end
+
+	-- now we have a huffman tree (codes -> symbols) but we need a map of symbols -> codes, so do that
+	local function iterate(root, path)
+		if type(root[1]) == "table" then
+			local t = shallowCopyTable(path)
+			t[#t+1] = false
+			iterate(root[1][1], t)
+			path[#path+1] = true
+			iterate(root[1][2], path)
+		else
+			symbolCodes[root[1]] = path
+		end
+	end
+	iterate(treeFragments[1], {})
+
+	local rv = {}
+
+	local symbolBitWidth = 8
+
+	--print("#syms: ",numSymbols)
+	--print("sbw: ",symbolBitWidth)
+
+	local function writeTree(tree)
+		if type(tree[1]) == "table" then
+			rv[#rv+1] = false
+			writeTree(tree[1][1])
+			writeTree(tree[1][2])
+		else
+			rv[#rv+1] = true
+			local symbol = tree[1]:byte()
+			for k = 0, symbolBitWidth - 1 do
+				
+				local testBit = 2 ^ k
+				
+				-- local bit = ((symbol & testBit) != 0)
+				local bit = (symbol % (2 * testBit)) >= testBit
+				rv[#rv+1] = bit
+			end
+		end
+	end
+
+	writeTree(treeFragments[1])
+
+	--print("tree size: ",#rv)
+
+	for k = 1, #data do
+		local symbol = data:sub(k,k)
+		--print(symbol," ",#symbolCodes[symbol])
+		for _, bit in ipairs(symbolCodes[symbol] or error("internal error: symbol "..symbol.." has no code")) do
+			rv[#rv+1] = bit
+		end
+	end
+
+	--print("total size: ",#rv)
+
+
+	-- convert the array of bits (rv) back to characters
+
+	
+
+	local s = ""
+
+	for k = 1, #rv do
+		s = s .. (rv[k] and '1' or '0')
+	end
+	return s, s:len()
+end
+
+local function numberstring(number, base)
+	local digits = {}
+	for i=0,9 do digits[i] = string.char(string.byte('0')+i) end
+	for i=10,36 do digits[i] = string.char(string.byte('A')+i-10) end
+	--print('kek')
+	local s = ""
+	repeat
+		local remainder = number % base
+		s = digits[remainder]..s
+		number = (number-remainder)/base
+	until number==0
+	return s
+end
+
+local function toBits(num)
+	--local num = tonumber(int)
+	-- returns a table of bits, least significant first.
+    local t={} -- will contain the bits
+	
+	local s = numberstring(num, 2)
+	for i = 1, #s do
+		t[i] = (s:sub(i, i) == '1' and true or false)
+	end
+	return t
+	--[[
+    while num>0 do
+        rest=math.fmod(num,2)
+        t[#t+1]=(rest == 1 and true or false)
+        num=math.ceil((num-rest)/2)
+    end
+    return t]]
+end
+
+local function concat(tbl)
+	local s = ''
+	for i = 1, #tbl do
+		s = s .. (tbl[i] and '1' or '0')
+	end
+	return s
+end
+
+local function unconcat(s)
+	local tBits = {}
+	for i = 1, #s do
+		tBits[i] = (s:sub(i, i) == '1' and true or false)
+	end
+	return tBits
+end
+
+local function reverse(tbl)
+	local newTbl = {}
+	for i = #tbl,1,-1 do
+		newTbl[1 + #tbl - i] = tbl[i]
+	end
+	return newTbl
+	--return unconcat(concat(tbl):reverse())
+end
+
+function decode(data, len)
+	local inPos = 1
+	local inBits = {}
+	local num = tonumber(data, 16)
+	--print('num: ' .. num)
+	local inBits = toBits(num)
+	--print('1: ' .. concat(inBits))
+	local newLen = #inBits
+	--inBits = reverse(inBits)
+	--print('newLen: ' .. newLen)
+	-- convert characters to bits
+	for i = 1,(len - newLen) do
+		inBits[#inBits+1] = false
+	end
+	inBits = reverse(inBits)
+	--print('1: '..data)
+	--data = string.rep('0', ) .. data]]
+	--print('2: '..concat(inBits))
+	--print(#concat(inBits))
+	local inText = data
+	--[[local inBits = {}
+	for k = 1, #inText do
+			local byte = inText:sub(k, k):byte() - 32
+			for i = 0, 5 do
+					local testBit = 2 ^ i
+					inBits[#inBits + 1] = (byte % (2 * testBit)) >= testBit
+			end
+	end
+   
+	-- remove padding
+	local padbit = inBits[#inBits]
+	while inBits[#inBits] == padbit do
+			inBits[#inBits] = nil
+	end]]
+	
+	
+	--local binary = tonumber(data, 16)
+	--data = string.rep('0', #data % 2) .. data
+	--[[for k=1,#data,2 do
+		local byte = tonumber(data:sub(k, k+1), 16)
+		for i = 0, 7 do
+				local testBit = 2 ^ i
+				inBits[#inBits + 1] = (byte % (2 * testBit)) >= testBit
+		end
+	end]]
+	
+	--table.reverse(inBits)
+	--print(textutils.serialize(inBits))
+   print('sesfef')
+	local pos = 1
+	local function readBit()
+			if pos > #inBits then error("end of stream", 2) end
+			pos = pos + 1
+			--print(inBits[pos - 1] and 'true' or 'false'
+			return inBits[pos - 1]
+	end
+	print('fefef')
+	-- read huffman tree
+	local function readTree()
+	
+			--[[if pos > #inBits then error("end of stream") end --very very VERY dirty workaround
+			pos = pos + 1
+			if inBits[pos - 1] then]]
+			
+			if readBit() then
+					local byte = 0
+					for i = 0, 7 do
+							--[[if pos > #inBits then error("end of stream") end --very very VERY dirty workaround
+							pos = pos + 1
+							if inBits[pos - 1] then]]
+							if readBit() then
+									byte = byte + 2 ^ i
+							end
+					end
+					write(string.char(byte))
+					return string.char(byte)
+			else	
+					--print('uhoh')
+					local subtree_0 = readTree()
+					local subtree_1 = readTree()
+					return {[false]=subtree_0, [true]=subtree_1}
+			end
+	end
+	local tree = readTree()
+   
+	inText = ""
+    print('fef')
+	local treePos = tree
+	while pos <= #inBits do
+	
+			--[[if pos > #inBits then error("end of stream") end --very very VERY dirty workaround
+			pos = pos + 1
+			local bit = inBits[pos - 1]]
+			local bit = readBit()
+			treePos = treePos[bit]
+			if type(treePos) ~= "table" then
+			
+					inText = inText .. treePos
+					treePos = tree
+			end
+	end
+	print('wew')
+	if treePos ~= tree then
+			error("unexpected end of stream")
+	end
+	return inText
+end
+
+local function enc(data)
+	local rv = {}
+	for k = 1, #data do
+		rv[k] = (data[k] and true or false)
+	end
+    local bitsPerByte = 6
+	local firstCharacter = 32
+   
+	-- pad to an integral number of bytes
+	local padbit = not rv[#rv]
+	repeat
+		rv[#rv+1] = padbit
+	until (#rv % bitsPerByte) == 0
+	local s = ''
+	for k = 1, #rv, bitsPerByte do
+		local byte = firstCharacter
+		for i = 0, bitsPerByte-1 do
+			if rv[k+i] then
+				byte = byte + 2 ^ i
+			end
+		end
+		s = s .. string.char(byte)
+	end
+	return s
+end
+
+local function hex(data, base)
+	return string.format('%x', tonumber(data, base or 2)..'')
+end
+
+--[[
+local out, len = encode(inText)
+print('out: '..out)
+print('len: '..len)
+print('num: '..tonumber(out, 2))
+out = hex(out)
+--local b64 = enc(encode(inText))
+sleep(5)
+local f = fs.open(outFN, "w")
+f.write(out .. '|' .. hex(len, 10))
+f.close()
+
+print("uncompressed size: ",inText:len())
+print("compressed size: ",out:len())
+--print('b64 size: ',b64:len())
+print("compression ratio: ",out:len()/inText:len())
+print('decoded: ',decode(out, len))]]
