@@ -5,7 +5,10 @@ tModule = {
 	['author'] = 'Mr. Bateman';
 }
 
---log.warning('FILESYS', 'Module partially broken', colors.yellow, colors.gray)
+if not isArg('full') then
+	log.warning('FILESYS', 'Argument not passed; ignoring this module', colors.yellow, colors.gray)
+	return false
+end
 --sleep(3)
 --return false, 'Module partially broken'
 

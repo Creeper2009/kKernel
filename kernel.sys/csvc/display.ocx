@@ -31,6 +31,7 @@ display.setTextColor = function(color)
 		end
 	end
 end
+display.setTextColour = display.setTextColor
 --term.setTextColour = term.setTextColor
 
 display.setBackgroundColor = function(color)
@@ -44,4 +45,5 @@ display.setBackgroundColor = function(color)
 		end
 	end
 end
+display.setBackgroundColour = display.setBackgroundColor
 --term.setBackgroundColour = term.setBackgroundColor

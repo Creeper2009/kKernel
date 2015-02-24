@@ -2,6 +2,7 @@ _G['kernel'] = {
 	['version'] = '1.0';
 	['modules'] = {};
 	['api'] = {};
+	['tlco'] = false;
 }
 kernel.chainloader = {
 	['version'] = '1.0';
@@ -14,8 +15,27 @@ local function ext(sPath) --extension
 	return sExt
 end
 
+local baseArgs = {...}
+local args = {}
+
+--sort args
+local lastArg = ''
+for i = 1,#baseArgs do
+	local arg = baseArgs[i]
+	if arg:sub(1,2) == '--' then
+		lastArg = arg:sub(3):lower()
+		args[lastArg] = {}
+	else
+		if lastArg ~= '' then table.insert(args[lastArg], arg) end
+	end
+end
+
 _G['isArg'] = function(sArg)
-	return false --not implemented yet
+	if args[sArg:lower()] then
+		return true, args[sArg:lower()]
+	else
+		return false, nil
+	end
 end
 
 local function isLoaded(sPath)
@@ -63,6 +83,12 @@ function kernel.loadCSVC(sPath)
 	end
 end
 
+local oldPrint = print
+local function print(...)
+	local sArgs = {...}
+	if not isArg('silent') then oldPrint(unpack(sArgs)) end
+end
+
 print('ChainLoader v' .. kernel.chainloader.version)
 if not isArg('safemode') then
 	print('[CHAIN] Loading APIs...')
@@ -95,7 +121,29 @@ if not isArg('safemode') then
 	end
 end
 
-shell.run('/kernel.sys/kernel')
+if isArg('TLCO') then
+	print('[CHAIN] Applying TLCO patch...')
+	kernel.tlco = true
+	--Credits to oeed for the code
+	os.queueEvent("modem_message")
+	print("Crashing this thread...")
+	local r = rednet.run
+	function rednet.run()
+		error("", 0)
+	end
+	local p = printError
+	function _G.printError()
+		print("WITH NO SURVIVORS")
+		_G.printError = p
+		rednet.run = r
+		local ok, err = pcall(function() assert(loadfile("/kernel.sys/kernel"))() end)
+		if not ok then printError(err) end
+	end
+else
+	shell.run('/kernel.sys/kernel')
+end
+
+--shell.run('/kernel.sys/kernel')
 
 --print('Returning to shell...')
 --sleep(99)

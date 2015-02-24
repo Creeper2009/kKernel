@@ -1,3 +1,8 @@
+if isArg('noWindow') then
+	print('[CHAIN] Bypassing window API...')
+	term.redirect(term.native()) --Credits to Geforce Fan & BombBloke for finding this tweak
+end
+
 local function newLine(cReturn)
 	if not cReturn then cReturn = colors.white end
 	display.setBackgroundColor(colors.black)
@@ -26,6 +31,7 @@ _G['cPrint'] = function(str, fore, bg)
 end
 
 _G['sPrint'] = function(prefix, str, preColor, strColor, preBG)
+	if isArg('silent') then return end
 	if not preColor then preColor = colors.white end
 	if not strColor then strColor = colors.white end
 	if not preBG then preBG = colors.black end
@@ -34,6 +40,7 @@ _G['sPrint'] = function(prefix, str, preColor, strColor, preBG)
 end
 
 _G['triprint'] = function(prefix, str, suffix, preColor, strColor, sufColor, preBG)
+	if isArg('silent') then return end
 	if not preColor then preColor = colors.white end
 	if not strColor then strColor = colors.white end
 	if not sufColor then sufColor = colors.white end
@@ -48,12 +55,12 @@ function trim(s)
  return n and s:match(".*%S", n) or ""
 end
 
-print('\nBegin kKernel boot')
+if not isArg('silent') then print('\nBegin kKernel boot') end
 
 local bCont = false
 
 function kernel.panic(err, cont)
-	bCont = cont
+	bCont = cont and not kernel.tlco
 	display.setBackgroundColor(colors.white)
 	display.setTextColor(colors.black)
 	newLine()
@@ -120,10 +127,14 @@ local function loadModule( _sPath )
 		--local status, data = 
 		return loadfile(_sPath)
 	end
-	local status, data, data2, data3 = pcall(main)
+	local status, data, data2 = pcall(main)
+	local result, d
     if data then
 		setfenv( data, tEnv )
-		local result, d = data()
+		result, d = data()
+		if result == false then
+			return 'ignore'
+		end
 		--cPrint(d)
 	else
         tAPIsLoading[sName] = nil
@@ -158,25 +169,45 @@ function kernel.loadModule(sPath)
 end
 
 xpcall(function()
-	sPrint('KERNEL', 'Checking Integrity...', colors.gray, nil, colors.lightGray)
+	if not isArg('silent') then sPrint('KERNEL', 'Checking Integrity...', colors.gray, nil, colors.lightGray) end
 	
-	triprint('KERNEL', 'Integrity:', 'OK', colors.gray, nil, colors.lime, colors.lightGray)
+	if not isArg('silent') then triprint('KERNEL', 'Integrity:', 'OK', colors.gray, nil, colors.lime, colors.lightGray) end
 
-	sPrint('KERNEL', 'Loading Modules...', colors.gray, nil, colors.lightGray)
+	if not isArg('silent') then sPrint('KERNEL', 'Loading Modules...', colors.gray, nil, colors.lightGray) end
 	local tAPI = fs.list('/kernel.sys/module/')
 	for i = 1,#tAPI do
 		local result, data = kernel.loadModule(tAPI[i])
 		if result then
-			triprint('KERNEL', 'Module ' .. data, 'OK', colors.gray, nil, colors.lime, colors.lightGray)
+			if not isArg('silent') then triprint('KERNEL', 'Module ' .. (data or '[!UNDEFINED!]'), 'OK', colors.gray, nil, colors.lime, colors.lightGray) end
 		else
 			if not isArg('force') then
 				sPrint('KERNEL', 'FATAL: Could not load Module module/'..tAPI[i], colors.gray, colors.red, colors.lightGray)
 				error(data or 'unavailable',0)
 			else
-				sPrint('KERNEL', 'WARN: Could not load Module module/'..tAPI[i], colors.gray, colors.yellow, colors.lightGray)
+				if not isArg('silent') then sPrint('KERNEL', 'WARN: Could not load Module module/'..tAPI[i], colors.gray, colors.yellow, colors.lightGray) end
 			end
 		end
 	end
+	
+	--begin
+	if isArg('clear') then
+		term.setBackgroundColor(colors.black)
+		term.setTextColor(colors.white)
+		term.clear()
+	end
+	
+	if isArg('boot') then
+		local status, tPath = isArg('boot')
+		
+		local env = setmetatable({ ['sRun'] = nil }, { __index = _G })
+		local run = loadstring('term.setBackgroundColor(colors.black);dofile("'..table.concat(tPath)..'")') --workaround to an issue with the background color, defaults to white
+		setfenv(run, env)
+		run()
+		
+		--shell.run(table.concat(tPath)) --old method
+	end
+	
+	--finished up
 	kernel.panic('reached end of execution', true)
 end, kernel.panic)
 
